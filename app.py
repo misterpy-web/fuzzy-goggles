@@ -1,139 +1,94 @@
-# app.py
 import io
-import json
-from typing import List, Tuple, Optional
+import pickle
+from typing import List, Optional, Tuple
 
+import numpy as np
 import streamlit as st
 from PIL import Image
 
-# ====== KERAS / TENSORFLOW ======
-try:
-    import tensorflow as tf
-    TF_AVAILABLE = True
-except Exception:
-    TF_AVAILABLE = False
-# -----------------------------------------------------------------------------
+st.set_page_config(page_title="CIFAR-100 Pickle Demo", page_icon="🧪", layout="centered")
+st.title("🧪 CIFAR-100 Pickle Model – Canlı Demo")
 
-st.set_page_config(page_title="Görüntü Sınıflandırma Demo", page_icon="🖼️", layout="centered")
-st.title("🖼️ Görüntü Sınıflandırma – Canlı Demo")
+# -------------------------------------------------------------
+# CIFAR-100 fine label names (index order 0..99)
+# Source: CIFAR-100 dataset class order (fine labels)
+# -------------------------------------------------------------
+CIFAR100_FINE = [
+    "apple","aquarium_fish","baby","bear","beaver","bed","bee","beetle","bicycle","bottle",
+    "bowl","boy","bridge","bus","butterfly","camel","can","castle","caterpillar","cattle",
+    "chair","chimpanzee","clock","cloud","cockroach","couch","crab","crocodile","cup","dinosaur",
+    "dolphin","elephant","flatfish","forest","fox","girl","hamster","house","kangaroo","keyboard",
+    "lamp","lawn_mower","leopard","lion","lizard","lobster","man","maple","motorcycle","mountain",
+    "mouse","mushroom","oak","orange","orchid","otter","palm","pear","pickup_truck","pine",
+    "plain","plate","poppy","porcupine","possum","rabbit","raccoon","ray","road","rocket",
+    "rose","sea","seal","shark","shrew","skunk","skyscraper","snail","snake","spider","squirrel",
+    "streetcar","sunflower","sweet_pepper","table","tank","telephone","television","tiger","tractor","train",
+    "trout","tulip","turtle","wardrobe","whale","willow","wolf","woman","worm"
+]
 
+# -------------------- Sidebar Controls ----------------------
 with st.sidebar:
     st.header("⚙️ Ayarlar")
-    framework = st.selectbox(
-        "Framework",
-        [opt for opt in ["PyTorch", "TensorFlow/Keras"] if (opt == "PyTorch" and TORCH_AVAILABLE) or (opt == "TensorFlow/Keras" and TF_AVAILABLE)],
-        help="Eğittiğiniz modele göre seçin."
-    )
-    model_path = st.text_input("Model dosyası yolu", value="model.pt" if framework=="PyTorch" else "model.h5",
-                               help="Örn. PyTorch için .pt/.pth, Keras için .h5/.keras")
-    labels_path = st.text_input("Sınıf etiketleri (JSON)", value="labels.json",
-                                help='JSON içinde ["cat","dog",...] gibi bir liste.')
-    input_size = st.number_input("Giriş boyutu (kare)", min_value=64, max_value=1024, value=224, step=16)
+    model_path = st.text_input("Pickle model dosyası", value="model.pkl")
+    input_size = st.number_input("Giriş boyutu (kare)", min_value=16, max_value=256, value=32, step=2,
+                                 help="CIFAR-100 32x32'dir; farklı eğittiyseniz değiştirin.")
+    normalize_01 = st.checkbox("0-1 aralığına ölçekle (/255)", value=True)
+    use_cifar_stats = st.checkbox("CIFAR-100 mean/std ile standartlaştır", value=False,
+                                  help="mean=[0.5071,0.4867,0.4408], std=[0.2675,0.2565,0.2761]")
+    channel_order = st.selectbox("Kanal sırası", options=["RGB", "BGR"], index=0)
+    flatten = st.checkbox("Düzle (1xH*W*C)", value=True, help="Çoğu sklearn modeli 2D input ister.")
     topk = st.number_input("Top-K", min_value=1, max_value=10, value=5, step=1)
-    st.caption("Not: Modelinize özel normalize/ön-işleme gerekiyorsa aşağıdaki fonksiyonları düzenleyin.")
+    label_source = st.selectbox("Sınıf etiketleri", ["CIFAR-100 (fine)", "Özel JSON yolundan oku"], index=0)
+    custom_labels_path = st.text_input("Özel labels.json (opsiyonel)", value="", help="[\"class0\",...]")
 
-uploaded = st.file_uploader("Bir görüntü yükleyin", type=["jpg", "jpeg", "png", "bmp", "webp"])
+# -------------------- Helpers -------------------------------
+@st.cache_resource(show_spinner=False)
+def load_pickle_model(path: str):
+    with open(path, "rb") as f:
+        model = pickle.load(f)
+    return model
 
-# ---------- Yardımcılar ----------
 @st.cache_data(show_spinner=False)
-def load_labels(labels_path: str) -> Optional[List[str]]:
+def load_custom_labels(path: str) -> Optional[List[str]]:
+    if not path:
+        return None
+    import json
     try:
-        with open(labels_path, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             labels = json.load(f)
         if isinstance(labels, dict):
-            # { "0": "cat", "1": "dog" } -> sıraya göre listele
             labels = [labels[str(i)] for i in range(len(labels))]
         return labels
     except Exception:
         return None
 
-# ====== PyTorch varyantı ======
-@st.cache_resource(show_spinner=False)
-def load_torch_model(model_path: str):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = torch.jit.load(model_path, map_location=device) if model_path.endswith(".pt") and not model_path.endswith(".pth") else torch.load(model_path, map_location=device)
-    model.eval()
-    return model, device
+@st.cache_data(show_spinner=False)
+def get_labels() -> List[str]:
+    if label_source == "CIFAR-100 (fine)":
+        return CIFAR100_FINE
+    lbls = load_custom_labels(custom_labels_path)
+    return lbls if lbls else CIFAR100_FINE
 
-def torch_preprocess(pil: Image.Image, input_size: int):
-    # Modelinizin eğitimde kullandığı normalize değerlerine göre düzenleyin
-    tfm = transforms.Compose([
-        transforms.Resize((input_size, input_size)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485,0.456,0.406], std=[0.229,0.224,0.225]),
-    ])
-    return tfm(pil).unsqueeze(0)
 
-@torch.no_grad()
-def torch_predict_topk(model, device, img_tensor, k: int) -> Tuple[List[int], List[float]]:
-    img_tensor = img_tensor.to(device)
-    logits = model(img_tensor)
-    probs = torch.softmax(logits, dim=1)
-    probs_k, idxs = torch.topk(probs, k=min(k, probs.size(1)), dim=1)
-    return idxs[0].cpu().tolist(), probs_k[0].cpu().tolist()
-
-# ====== Keras varyantı ======
-@st.cache_resource(show_spinner=False)
-def load_keras_model(model_path: str):
-    model = tf.keras.models.load_model(model_path, compile=False)
-    return model
-
-def keras_preprocess(pil: Image.Image, input_size: int):
-    pil = pil.resize((input_size, input_size))
-    arr = tf.keras.preprocessing.image.img_to_array(pil)
-    # Modelinizin eğitimde kullandığı ölçekleme/normalize adımlarını düzenleyin
-    arr = arr / 255.0
-    arr = tf.expand_dims(arr, 0)  # (1, H, W, C)
+def preprocess_image(pil_img: Image.Image, size: int, normalize: bool, standardize: bool, order: str, flatten_: bool) -> np.ndarray:
+    img = pil_img.convert("RGB").resize((size, size))
+    arr = np.asarray(img, dtype=np.float32)
+    if normalize:
+        arr = arr / 255.0
+    if standardize:
+        mean = np.array([0.5071, 0.4867, 0.4408], dtype=np.float32)
+        std = np.array([0.2675, 0.2565, 0.2761], dtype=np.float32)
+        arr = (arr - mean) / std
+    if order == "BGR":
+        arr = arr[..., ::-1]
+    if flatten_:
+        arr = arr.reshape(1, -1)
+    else:
+        arr = np.expand_dims(arr, 0)  # (1,H,W,C)
     return arr
 
-def keras_predict_topk(model, arr, k: int) -> Tuple[List[int], List[float]]:
-    preds = model.predict(arr, verbose=0)
-    if preds.ndim == 1:
-        preds = preds[None, :]
-    probs = tf.nn.softmax(preds, axis=1).numpy()
-    idxs = probs.argsort(axis=1)[:, ::-1][:, :k][0].tolist()
-    vals = probs[0, idxs].tolist()
-    return idxs, vals
 
-# ---------- Uygulama akışı ----------
-labels = load_labels(labels_path)
-if labels is None:
-    st.info("📄 İsteğe bağlı: `labels.json` dosyası ekleyerek sınıf isimlerini gösterebilirsiniz.")
-
-if uploaded:
-    img = Image.open(io.BytesIO(uploaded.read())).convert("RGB")
-    st.image(img, caption="Yüklenen Görsel", use_column_width=True)
-
-    with st.spinner("Model çalışıyor..."):
-        if framework == "PyTorch":
-            if not TORCH_AVAILABLE:
-                st.error("PyTorch bulunamadı. `pip install torch torchvision` deneyin.")
-            else:
-                try:
-                    model, device = load_torch_model(model_path)
-                except Exception as e:
-                    st.error(f"Model yüklenemedi: {e}")
-                else:
-                    tensor = torch_preprocess(img, input_size)
-                    idxs, probs = torch_predict_topk(model, device, tensor, topk)
-
-        elif framework == "TensorFlow/Keras":
-            if not TF_AVAILABLE:
-                st.error("TensorFlow/Keras bulunamadı. `pip install tensorflow` deneyin.")
-            else:
-                try:
-                    model = load_keras_model(model_path)
-                except Exception as e:
-                    st.error(f"Model yüklenemedi: {e}")
-                else:
-                    arr = keras_preprocess(img, input_size)
-                    idxs, probs = keras_predict_topk(model, arr, topk)
-
-    if uploaded and 'idxs' in locals():
-        st.subheader("🔮 Tahminler")
-        for rank, (i, p) in enumerate(zip(idxs, probs), start=1):
-            name = labels[i] if (labels and i < len(labels)) else f"class_{i}"
-            st.write(f"**{rank}. {name}** — {p:.3f} olasılık")
-        st.success("Tamam!")
-else:
-    st.write("👈 Soldan model/ayarları girip bir görüntü yükleyin.")
+def softmax(x: np.ndarray) -> np.ndarray:
+    x = x - np.max(x, axis=1, keepdims=True)
+    e = np.exp(x)
+    return e / np.s
