@@ -1,5 +1,5 @@
 streamlit
 pillow
-tensorflow
+tensorflow==2.15.0.post1
+huggingface_hub
 requests
-pathlib
