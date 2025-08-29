@@ -8,8 +8,14 @@ import numpy as np
 import streamlit as st
 from PIL import Image
 
-# TensorFlow / Keras
-import tensorflow as tf
+# TensorFlow / Keras (kurulu değilse uygulama çökmemesi için korumalı import)
+try:
+    import tensorflow as tf
+    TF_AVAILABLE = True
+    TF_IMPORT_ERR = None
+except Exception as _e:
+    TF_AVAILABLE = False
+    TF_IMPORT_ERR = str(_e)
 
 st.set_page_config(page_title="CIFAR-100 Keras (H5) Demo", page_icon="🧪", layout="centered")
 st.title("🧪 CIFAR-100 – Keras .h5 Model Canlı Demo")
@@ -31,21 +37,53 @@ CIFAR100_FINE = [
 ]
 
 # -------------------------------------------------------------
-# Otomatik model bulma (./models klasöründeki .h5/.keras dosyaları)
+# Kaynak seçenekleri: Local / Hugging Face / Direct URL
 # -------------------------------------------------------------
-MODELS_DIR = os.environ.get("MODELS_DIR", "models")
-os.makedirs(MODELS_DIR, exist_ok=True)
-FOUND_MODELS = sorted(glob.glob(os.path.join(MODELS_DIR, "*.h5")) +
-                      glob.glob(os.path.join(MODELS_DIR, "*.keras")))
+import pathlib
+MODELS_DIR = pathlib.Path(os.environ.get("MODELS_DIR", "models"))
+MODELS_DIR.mkdir(parents=True, exist_ok=True)
+FOUND_MODELS = sorted([p.name for p in MODELS_DIR.glob("*.h5")] + [p.name for p in MODELS_DIR.glob("*.keras")])
 
 with st.sidebar:
-    st.header("📦 Model seçimi")
-    if not FOUND_MODELS:
-        st.info("models/ klasörüne .h5 veya .keras dosyaları koyun.")
-        selected_model_path = st.text_input("Veya tam yol girin", value="")
-    else:
-        selected_name = st.selectbox("Model (.h5/.keras)", [os.path.basename(p) for p in FOUND_MODELS])
-        selected_model_path = os.path.join(MODELS_DIR, selected_name)
+    st.header("📦 Model Kaynağı")
+    source = st.radio("Model kaynağı", ["Local (.h5)", "Hugging Face Hub", "Direct URL"], index=0)
+
+    selected_model_path = ""
+    if source == "Local (.h5)":
+        if not FOUND_MODELS:
+            st.info("models/ klasörüne .h5/.keras dosyaları koyun.")
+        else:
+            selected_name = st.selectbox("Yerel model", FOUND_MODELS)
+            selected_model_path = str(MODELS_DIR / selected_name)
+
+    elif source == "Hugging Face Hub":
+        st.caption("Örn. repo: your-username/cifar100-model, filename: model.h5")
+        hf_repo = st.text_input("HF repo id", value="")
+        hf_filename = st.text_input("Dosya adı", value="model.h5")
+        hf_revision = st.text_input("Revizyon/branch (opsiyonel)", value="")
+        if st.button("📥 Hugging Face'ten indir"):
+            try:
+                from huggingface_hub import hf_hub_download
+                path = hf_hub_download(repo_id=hf_repo, filename=hf_filename, revision=(hf_revision or None), local_dir=str(MODELS_DIR))
+                st.success(f"İndirildi: {path}")
+                selected_model_path = path
+            except Exception as e:
+                st.error(f"HF indirme hatası: {e}")
+
+    elif source == "Direct URL":
+        url = st.text_input("Model URL (.h5/.keras)", value="")
+        url_name = st.text_input("Kaydetme adı", value="model_from_url.h5")
+        if st.button("📥 URL'den indir"):
+            try:
+                import requests
+                dest = MODELS_DIR / url_name
+                r = requests.get(url, timeout=60)
+                r.raise_for_status()
+                dest.write_bytes(r.content)
+                st.success(f"İndirildi: {dest}")
+                selected_model_path = str(dest)
+            except Exception as e:
+                st.error(f"URL indirme hatası: {e}")
 
     topk = st.number_input("Top-K", min_value=1, max_value=10, value=5, step=1)
 
@@ -155,6 +193,28 @@ uploaded = st.file_uploader("Bir görüntü yükleyin", type=["png","jpg","jpeg"
 
 if not selected_model_path:
     st.warning("Sol taraftan bir model seçin veya tam yol girin.")
+    st.stop()
+
+if not TF_AVAILABLE:
+    st.error("TensorFlow yüklü değil. Aşağıdaki talimatlarla kurun ve tekrar deneyin.
+
+`requirements.txt` içeriği örneği:
+
+```
+streamlit
+pillow
+tensorflow==2.15.0.post1
+```
+
+`runtime.txt` (Streamlit Cloud için Python sürümü sabitleme):
+
+````
+3.10
+````
+
+> Alternatif: `tensorflow-cpu==2.15.0.post1` de kullanılabilir.
+
+Hata: " + (TF_IMPORT_ERR or "unknown"))
     st.stop()
 
 try:
