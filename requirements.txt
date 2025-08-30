@@ -1,6 +1,6 @@
-streamlit==1.49.1
+streamlit
+tensorflow
 pillow
-tensorflow==2.20.0
+torch
+torchvision
 huggingface_hub
-requests
-ultralytics 
