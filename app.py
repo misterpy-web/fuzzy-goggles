@@ -234,7 +234,7 @@ with st.sidebar:
 https://huggingface.co/username/repo/resolve/main/model.h5
 https://huggingface.co/username/another-repo/blob/main/weights/model.keras
 """
-))
+)
         auto_select_last = st.checkbox("İndirilen son modeli otomatik seç", value=True)
         if st.button("📥 Linkleri indir ve ekle"):
             downloaded, failed = download_many_hf_links(links_text or "")
@@ -370,3 +370,4 @@ requests
 > Streamlit Cloud kullanıyorsanız Python sürümü için `runtime.txt` içine `3.10` koymanız tavsiye edilir.
     """
 )
+
