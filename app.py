@@ -239,16 +239,12 @@ https://huggingface.co/username/another-repo/blob/main/weights/model.keras
         if st.button("📥 Linkleri indir ve ekle"):
             downloaded, failed = download_many_hf_links(links_text or "")
             if downloaded:
-                st.success("İndirilenler:
-" + "
-".join(downloaded))
+                st.success("İndirilenler:" + "".join(downloaded))
                 FOUND_LOCAL = sorted([p.name for p in MODELS_DIR.glob("*.h5")] + [p.name for p in MODELS_DIR.glob("*.keras")])
                 if auto_select_last:
                     selected_model_path = downloaded[-1]
             if failed:
-                st.warning("İndirilemeyenler:
-" + "
-".join(f"- {u} → {err}" for u, err in failed))
+                st.warning("İndirilemeyenler:" + "".join(f"- {u} → {err}" for u, err in failed))
 
     elif source == "HF Repo Tara":
         st.caption("Bir Hugging Face deposundaki .h5/.keras dosyalarını listeleyip indirir.")
@@ -370,4 +366,5 @@ requests
 > Streamlit Cloud kullanıyorsanız Python sürümü için `runtime.txt` içine `3.10` koymanız tavsiye edilir.
     """
 )
+
 
