@@ -1,6 +1,0 @@
-streamlit
-tensorflow
-pillow
-torch
-torchvision
-huggingface_hub
