@@ -201,14 +201,6 @@ for r, (i, p) in enumerate(zip(idxs, vals), start=1):
     st.write(f"**{r}. {name}** — {p:.3f}")
 
 st.success("Tamamlandı ✅")
-"""
-st.markdown("---")
-st.markdown(
-    """
-**Kullanım:**
-1. `models/` klasörüne `.h5` / `.keras` dosyalarınızı koyun veya HuggingFace reposuna yükleyin.
-2. Gerekirse aynı klasöre `labels.json` ekleyin; yoksa **CIFAR-100 fine** etiketleri kullanılır.
-3. Uygulama giriş boyutunu **otomatik** algılar.
-    """
-)
-"""
+#st.markdown("---")
+
+
