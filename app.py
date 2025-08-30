@@ -184,20 +184,23 @@ requests
         hf_paths = []
         st.warning(f"HF listelenemedi: {e}")
 
-    # Build single dropdown options
+    # Build single dropdown options (benzersiz isim: yerel > HF)
     from collections import Counter
-    local_basenames = local_files
+    local_basenames = [p for p in local_files]
     hf_basenames = [os.path.basename(p) for p in hf_paths]
-    counts = Counter(local_basenames + hf_basenames)
 
+    # 1) Önce yerel dosyaları ekle
     options = []  # (display, source, ident)
     for name in sorted(local_basenames):
-        display = name if counts[name] == 1 else f"{name} (local)"
-        options.append((display, "local", name))
+        options.append((name, "local", name))
+
+    # 2) Aynı ada sahip HF dosyalarını atla (yerel öncelikli)
+    local_set = set(local_basenames)
     for full in sorted(hf_paths):
         base = os.path.basename(full)
-        display = base if counts[base] == 1 else f"{base} (hf:{full})"
-        options.append((display, "hf", full))
+        if base in local_set:
+            continue  # zaten yerelde var → tek kere göster
+        options.append((base, "hf", full))
 
     if not options:
         st.info("Henüz model yok. HF repodan indirebilir veya repo/models içine ekleyebilirsiniz.")
