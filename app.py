@@ -231,11 +231,6 @@ if detected_img:
     st.image(detected_img, caption="Nesne Tespiti (Faster R-CNN)", use_container_width=True)
 
 
-# Nesne tespiti ve kutu çizme
-detected_img = run_detection(img)
-if detected_img:
-    st.image(detected_img, caption="Nesne Tespiti (YOLOv8)", use_container_width=True)
-
 
 x = preprocess(img, INPUT_SIZE)
 with st.spinner("Tahmin ediliyor..."):
@@ -260,5 +255,6 @@ st.markdown(
 3. Uygulama giriş boyutunu **otomatik** algılar.
     """
 )
+
 
 
