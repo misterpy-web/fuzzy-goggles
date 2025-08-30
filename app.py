@@ -17,26 +17,42 @@ except Exception as _e:
     TF_AVAILABLE = False
     TF_IMPORT_ERR = str(_e)
 
-# YOLO import (yeni)
-try:
-    from ultralytics import YOLO
-    YOLO_AVAILABLE = True
-except Exception as _e:
-    YOLO_AVAILABLE = False
-    st.warning(f"YOLO kullanılamıyor: {_e}")
-def run_detection(pil_img: Image.Image) -> Optional[Image.Image]:
-    """YOLO ile nesne tespiti yap ve kutulu görsel döndür."""
-    if not YOLO_AVAILABLE:
-        return None
-    try:
-        model_yolo = YOLO("yolov8n.pt")  # küçük pre-trained model
-        results = model_yolo.predict(pil_img, verbose=False)
-        # YOLO sonucu kutularla birlikte görsel olarak al
-        annotated = results[0].plot()  # numpy array
-        return Image.fromarray(annotated)
-    except Exception as e:
-        st.error(f"YOLO detection hatası: {e}")
-        return None
+# --- [yeni ekleme: detection için torchvision] ---
+import torch
+from torchvision.models.detection import fasterrcnn_resnet50_fpn
+from torchvision import transforms as T
+from PIL import ImageDraw
+
+@st.cache_resource
+def load_detection_model():
+    model = fasterrcnn_resnet50_fpn(pretrained=True)
+    model.eval()
+    return model
+
+def run_detection(pil_img: Image.Image):
+    det_model = load_detection_model()
+    transform = T.Compose([T.ToTensor()])
+    img_tensor = transform(pil_img)
+    with torch.no_grad():
+        preds = det_model([img_tensor])[0]
+
+    boxes = preds["boxes"]
+    labels = preds["labels"]
+    scores = preds["scores"]
+
+    draw = pil_img.copy()
+    d = ImageDraw.Draw(draw)
+
+    for box, label, score in zip(boxes, labels, scores):
+        if score < 0.5:  # güven eşiği
+            continue
+        x1, y1, x2, y2 = box
+        d.rectangle([x1, y1, x2, y2], outline="red", width=2)
+        d.text((x1, y1), f"{label.item()} ({score:.2f})", fill="red")
+
+    return draw
+# --- [ekleme sonu] ---
+
 
 
 st.set_page_config(page_title="CIFAR-100 Keras (H5) Demo", page_icon="🧪", layout="centered")
@@ -210,6 +226,11 @@ if uploaded is None:
 img = Image.open(io.BytesIO(uploaded.read()))
 st.image(img, caption="Yüklenen Görsel", use_container_width=True)
 
+detected_img = run_detection(img)
+if detected_img:
+    st.image(detected_img, caption="Nesne Tespiti (Faster R-CNN)", use_container_width=True)
+
+
 # Nesne tespiti ve kutu çizme
 detected_img = run_detection(img)
 if detected_img:
@@ -239,4 +260,5 @@ st.markdown(
 3. Uygulama giriş boyutunu **otomatik** algılar.
     """
 )
+
 
