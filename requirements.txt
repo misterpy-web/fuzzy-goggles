@@ -1,5 +1,5 @@
-streamlit
+streamlit==1.49.1
 pillow
-tensorflow==2.15.0.post1
+tensorflow==2.20.0
 huggingface_hub
 requests
