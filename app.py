@@ -227,11 +227,14 @@ with st.sidebar:
 
     elif source == "HF Linkleri (çoklu)":
         st.caption("Her satıra bir HF dosya linki yapıştırın (resolve/blob). Örn: https://huggingface.co/user/repo/resolve/main/model.h5")
-        links_text = st.text_area("HF linkleri", height=140, placeholder=(
-            "https://huggingface.co/misterpy-web/erty2323/resolve/main/model.h5
-"
-            "https://huggingface.co/username/another-repo/blob/main/weights/model.keras"
-        ))
+        links_text = st.text_area(
+    "HF linkleri",
+    height=140,
+    placeholder="""
+https://huggingface.co/username/repo/resolve/main/model.h5
+https://huggingface.co/username/another-repo/blob/main/weights/model.keras
+"""
+))
         auto_select_last = st.checkbox("İndirilen son modeli otomatik seç", value=True)
         if st.button("📥 Linkleri indir ve ekle"):
             downloaded, failed = download_many_hf_links(links_text or "")
@@ -283,8 +286,25 @@ with st.sidebar:
 # Ana akış
 # -------------------------------------------------------------
 if not TF_AVAILABLE:
-    st.error("TensorFlow yüklü değil. requirements.txt içine `tensorflow==2.15.0.post1` ekleyin.
-Ayrıca: huggingface_hub ve requests de gereklidir.")
+    st.error(
+        """TensorFlow yüklü değil veya bu Python sürümüyle uyumlu değil.
+
+"
+        "Lütfen `requirements.txt` dosyanızı aşağıdaki gibi ayarlayın ve yeniden deploy edin:
+
+"
+        "```
+streamlit==1.49.1
+pillow
+tensorflow==2.20.0
+huggingface_hub
+requests
+```
+
+"
+        "> Not: Streamlit Cloud şu an Python 3.13 kullanıyor; `tensorflow==2.20.0` bu sürümle uyumludur.
+"""
+    )
     st.stop()
 
 if not any([p for p in MODELS_DIR.glob("*.h5")] + [p for p in MODELS_DIR.glob("*.keras")]) and not selected_model_path:
@@ -318,7 +338,7 @@ if uploaded is None:
     st.stop()
 
 img = Image.open(io.BytesIO(uploaded.read()))
-st.image(img, caption="Yüklenen Görsel", use_column_width=True)
+st.image(img, caption="Yüklenen Görsel", use_container_width=True)
 
 x = preprocess(img, INPUT_SIZE, keep_aspect)
 with st.spinner("Tahmin ediliyor..."):
