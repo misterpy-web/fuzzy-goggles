@@ -201,7 +201,7 @@ for r, (i, p) in enumerate(zip(idxs, vals), start=1):
     st.write(f"**{r}. {name}** — {p:.3f}")
 
 st.success("Tamamlandı ✅")
-
+"""
 st.markdown("---")
 st.markdown(
     """
@@ -211,3 +211,4 @@ st.markdown(
 3. Uygulama giriş boyutunu **otomatik** algılar.
     """
 )
+"""
