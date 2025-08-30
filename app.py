@@ -1,7 +1,6 @@
 import io
 import os
 import json
-import glob
 import pathlib
 import re
 from typing import List, Optional, Tuple
@@ -16,7 +15,6 @@ from PIL import Image
 try:
     import tensorflow as tf
     TF_AVAILABLE = True
-    TF_IMPORT_ERR = None
 except Exception as _e:
     TF_AVAILABLE = False
     TF_IMPORT_ERR = str(_e)
@@ -37,14 +35,30 @@ CIFAR100_FINE = [
 ]
 
 # -------------------------------------------------------------
-# Model depolama klasörü (mevcut klasör altında ./models)
+# Ayarlar: SADECE BU HUGGING FACE REPO İÇİN ÇEK (sabitle)
 # -------------------------------------------------------------
-MODELS_DIR = pathlib.Path(os.environ.get("MODELS_DIR", "models"))
+HF_REPO = "misterpy-web/erty2323"  # 🔒 sadece bu repo
+MODELS_DIR = pathlib.Path("models")
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 # -------------------------------------------------------------
-# Yardımcılar: etiket, boyut, ön-işleme ve indirme rutinleri
+# Yardımcılar
 # -------------------------------------------------------------
+@st.cache_resource(show_spinner=False)
+def list_hf_files(repo_id: str) -> List[str]:
+    from huggingface_hub import HfApi
+    api = HfApi()
+    files = api.list_repo_files(repo_id=repo_id)
+    return [f for f in files if f.lower().endswith((".h5", ".keras"))]
+
+
+@st.cache_resource(show_spinner=False)
+def hf_download(repo_id: str, filename: str, revision: Optional[str] = None) -> str:
+    from huggingface_hub import hf_hub_download
+    path = hf_hub_download(repo_id=repo_id, filename=filename, revision=revision, local_dir=str(MODELS_DIR))
+    return path
+
+
 @st.cache_resource(show_spinner=False)
 def load_keras_model(path: str):
     model = tf.keras.models.load_model(path, compile=False)
@@ -128,195 +142,61 @@ def topk_from_probs(probs: np.ndarray, k: int) -> Tuple[List[int], List[float]]:
     vals = probs[0, idxs].astype(float).tolist()
     return idxs, vals
 
-# ---------------------- İNDİRME YARDIMCILARI ----------------------
-@st.cache_resource(show_spinner=False)
-def hf_download(repo_id: str, filename: str, revision: Optional[str] = None) -> str:
-    from huggingface_hub import hf_hub_download
-    path = hf_hub_download(repo_id=repo_id, filename=filename, revision=revision, local_dir=str(MODELS_DIR))
-    return path
-
-
-def parse_hf_resolve_or_blob(url: str) -> Optional[Tuple[str, str, str]]:
-    """HF linklerini ayrıştır: return (repo_id, revision, filepath) or None.
-    Destek: .../resolve/<rev>/<filepath> veya .../blob/<rev>/<filepath>
-    """
-    m = re.search(r"huggingface\.co/([^/]+/[^/]+)/(?:(resolve|blob))/([^/]+)/(.+)$", url)
-    if not m:
-        return None
-    repo_id, _rtype, revision, filepath = m.groups()
-    return repo_id, revision, filepath
-
-
-def download_many_hf_links(links_text: str) -> Tuple[List[str], List[Tuple[str, str]]]:
-    downloaded, failed = [], []
-    try:
-        from huggingface_hub import hf_hub_download  # noqa: F401
-    except Exception as e:
-        return downloaded, [("huggingface_hub import", "huggingface_hub kurulu değil")] 
-    for raw in links_text.splitlines():
-        url = raw.strip()
-        if not url:
-            continue
-        if "huggingface.co" not in url:
-            failed.append((url, "HF linki değil"))
-            continue
-        parsed = parse_hf_resolve_or_blob(url)
-        if not parsed:
-            failed.append((url, "Desen çözümlenemedi (resolve/blob)"))
-            continue
-        repo_id, revision, filepath = parsed
-        try:
-            path = hf_download(repo_id, filepath, revision)
-            downloaded.append(path)
-        except Exception as e:
-            failed.append((url, str(e)))
-    return downloaded, failed
-
-
-def direct_url_download(url: str, save_as: str) -> str:
-    import requests
-    dest = MODELS_DIR / save_as
-    r = requests.get(url, timeout=120)
-    r.raise_for_status()
-    dest.write_bytes(r.content)
-    return str(dest)
-
 # -------------------------------------------------------------
-# Sidebar – model kaynağı ve indirme seçenekleri
+# Sidebar – SADECE belirlenen HF reposundan seçim
 # -------------------------------------------------------------
-FOUND_LOCAL = sorted([p.name for p in MODELS_DIR.glob("*.h5")] + [p.name for p in MODELS_DIR.glob("*.keras")])
-
 with st.sidebar:
-    st.header("📦 Model Kaynağı")
-    source = st.radio("Model kaynağı", ["Local (.h5)", "Hugging Face Hub", "Direct URL", "HF Linkleri (çoklu)", "HF Repo Tara"], index=0)
+    st.header("📦 Model kaynağı: Hugging Face (sabit)")
+    st.caption(f"Repo: **{HF_REPO}**")
 
-    selected_model_path = ""
+    if not TF_AVAILABLE:
+        st.error("""TensorFlow yüklü değil veya bu Python sürümüyle uyumlu değil.
 
-    if source == "Local (.h5)":
-        if not FOUND_LOCAL:
-            st.info("models/ klasörüne .h5/.keras dosyaları koyun veya diğer sekmelerden indirin.")
-        else:
-            selected_name = st.selectbox("Yerel model", FOUND_LOCAL)
-            selected_model_path = str(MODELS_DIR / selected_name)
 
-    elif source == "Hugging Face Hub":
-        st.caption("Örn. repo: your-user/cifar100-model · filename: model.h5 · rev: main")
-        hf_repo = st.text_input("HF repo id", value="")
-        hf_filename = st.text_input("Dosya adı", value="model.h5")
-        hf_revision = st.text_input("Revizyon/branch (opsiyonel)", value="")
-        if st.button("📥 HF'ten indir"):
-            try:
-                path = hf_download(hf_repo, hf_filename, hf_revision or None)
-                st.success(f"İndirildi: {path}")
-                selected_model_path = path
-                FOUND_LOCAL = sorted([p.name for p in MODELS_DIR.glob("*.h5")] + [p.name for p in MODELS_DIR.glob("*.keras")])
-            except Exception as e:
-                st.error(f"HF indirme hatası: {e}")
+requirements.txt örneği:
 
-    elif source == "Direct URL":
-        url = st.text_input("Model URL (.h5/.keras)", value="")
-        url_name = st.text_input("Kaydetme adı", value="model_from_url.h5")
-        if st.button("📥 URL'den indir"):
-            try:
-                path = direct_url_download(url, url_name)
-                st.success(f"İndirildi: {path}")
-                selected_model_path = path
-                FOUND_LOCAL = sorted([p.name for p in MODELS_DIR.glob("*.h5")] + [p.name for p in MODELS_DIR.glob("*.keras")])
-            except Exception as e:
-                st.error(f"URL indirme hatası: {e}")
-
-    elif source == "HF Linkleri (çoklu)":
-        st.caption("Her satıra bir HF dosya linki yapıştırın (resolve/blob). Örn: https://huggingface.co/user/repo/resolve/main/model.h5")
-        links_text = st.text_area(
-    "HF linkleri",
-    height=140,
-    placeholder="""
-https://huggingface.co/username/repo/resolve/main/model.h5
-https://huggingface.co/username/another-repo/blob/main/weights/model.keras
-"""
-)
-        auto_select_last = st.checkbox("İndirilen son modeli otomatik seç", value=True)
-        if st.button("📥 Linkleri indir ve ekle"):
-            downloaded, failed = download_many_hf_links(links_text or "")
-            if downloaded:
-                st.success("İndirilenler:" + "".join(downloaded))
-                FOUND_LOCAL = sorted([p.name for p in MODELS_DIR.glob("*.h5")] + [p.name for p in MODELS_DIR.glob("*.keras")])
-                if auto_select_last:
-                    selected_model_path = downloaded[-1]
-            if failed:
-                st.warning("İndirilemeyenler:" + "".join(f"- {u} → {err}" for u, err in failed))
-
-    elif source == "HF Repo Tara":
-        st.caption("Bir Hugging Face deposundaki .h5/.keras dosyalarını listeleyip indirir.")
-        default_repo = "misterpy-web/erty2323"
-        hf_repo_list = st.text_input("HF repo id", value=default_repo)
-        refresh = st.button("📄 Dosyaları Listele")
-        files_list = []
-        if refresh and hf_repo_list:
-            try:
-                from huggingface_hub import HfApi
-                api = HfApi()
-                files_list = api.list_repo_files(repo_id=hf_repo_list)
-                h5_files = [f for f in files_list if f.lower().endswith((".h5", ".keras"))]
-                if not h5_files:
-                    st.warning("Bu repoda .h5/.keras dosyası bulunamadı.")
-                else:
-                    choice = st.selectbox("İndirilecek dosya", h5_files)
-                    if st.button("📥 Seçili dosyayı indir"):
-                        try:
-                            path = hf_download(hf_repo_list, choice, None)
-                            st.success(f"İndirildi: {path}")
-                            selected_model_path = path
-                        except Exception as e:
-                            st.error(f"İndirme hatası: {e}")
-            except Exception as e:
-                st.error(f"Listeleme hatası: {e}")
-
-    topk = st.number_input("Top-K", min_value=1, max_value=10, value=5, step=1)
-    with st.expander("Gelişmiş (opsiyonel)"):
-        manual_size = st.number_input("Zorla giriş boyutu (0 = otomatik)", min_value=0, max_value=1024, value=0, step=8)
-        force_softmax = st.checkbox("Çıkışa softmax uygula (zorla)", value=False, help="Model logit döndürüyorsa kullanın.")
-        keep_aspect = st.checkbox("En-boy oranını koru (pad)", value=False)
-
-# -------------------------------------------------------------
-# Ana akış
-# -------------------------------------------------------------
-if not TF_AVAILABLE:
-    st.error(
-        """TensorFlow yüklü değil veya bu Python sürümüyle uyumlu değil.
-
-"
-        "Lütfen `requirements.txt` dosyanızı aşağıdaki gibi ayarlayın ve yeniden deploy edin:
-
-"
-        "```
+```
 streamlit==1.49.1
 pillow
 tensorflow==2.20.0
 huggingface_hub
 requests
 ```
+""")
+        st.stop()
 
-"
-        "> Not: Streamlit Cloud şu an Python 3.13 kullanıyor; `tensorflow==2.20.0` bu sürümle uyumludur.
-"""
-    )
+    # Repo içindeki .h5/.keras dosyalarını listele
+    try:
+        hf_files = list_hf_files(HF_REPO)
+    except Exception as e:
+        st.error(f"Repo dosyaları listelenemedi: {e}")
+        st.stop()
+
+    if not hf_files:
+        st.warning("Bu repoda .h5/.keras dosyası bulunamadı.")
+        st.stop()
+
+    chosen_file = st.selectbox("Model dosyası", hf_files)
+    rev = st.text_input("Revizyon/branch (opsiyonel)", value="")
+    auto_download = st.checkbox("Seçince indir ve kullan", value=True)
+
+    topk = st.number_input("Top-K", min_value=1, max_value=10, value=5, step=1)
+    with st.expander("Gelişmiş (opsiyonel)"):
+        manual_size = st.number_input("Zorla giriş boyutu (0 = otomatik)", min_value=0, max_value=1024, value=0, step=8)
+        force_softmax = st.checkbox("Çıkışa softmax uygula (zorla)", value=False)
+        keep_aspect = st.checkbox("En-boy oranını koru (pad)", value=False)
+
+# -------------------------------------------------------------
+# Ana akış
+# -------------------------------------------------------------
+# Modeli indir
+try:
+    selected_model_path = hf_download(HF_REPO, chosen_file, rev or None) if auto_download else str(MODELS_DIR / pathlib.Path(chosen_file).name)
+except Exception as e:
+    st.error(f"Model indirilemedi: {e}")
     st.stop()
 
-if not any([p for p in MODELS_DIR.glob("*.h5")] + [p for p in MODELS_DIR.glob("*.keras")]) and not selected_model_path:
-    st.warning("Model bulunamadı. Soldan indirin veya yerel bir model seçin.")
-    st.stop()
-
-if not selected_model_path:
-    # Local listeden hızlı seçim
-    FOUND_LOCAL = sorted([p.name for p in MODELS_DIR.glob("*.h5")] + [p.name for p in MODELS_DIR.glob("*.keras")])
-    if FOUND_LOCAL:
-        selected_model_path = str(MODELS_DIR / FOUND_LOCAL[0])
-
-if not selected_model_path:
-    st.warning("Lütfen bir model seçin.")
-    st.stop()
-
+# Yükle
 try:
     model = load_keras_model(selected_model_path)
 except Exception as e:
@@ -354,17 +234,13 @@ st.markdown("---")
 st.markdown(
     """
 **requirements.txt** önerisi:
-
 ```
-streamlit
+streamlit==1.49.1
 pillow
-tensorflow==2.15.0.post1
+tensorflow==2.20.0
 huggingface_hub
 requests
 ```
-
-> Streamlit Cloud kullanıyorsanız Python sürümü için `runtime.txt` içine `3.10` koymanız tavsiye edilir.
+> Streamlit Cloud Python 3.13 ile uyum için TF 2.20.0 kullanın.
     """
 )
-
-
