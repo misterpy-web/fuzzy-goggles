@@ -143,16 +143,18 @@ def topk_from_probs(probs: np.ndarray, k: int) -> Tuple[List[int], List[float]]:
     return idxs, vals
 
 # -------------------------------------------------------------
-# Sidebar – Kaynak seçimi: HF (sabit repo) + Yerel (GitHub/models)
+# Sidebar – Tek menü: HF (sabit repo) + Yerel (GitHub/models) birleştirilmiş
 # -------------------------------------------------------------
 with st.sidebar:
-    st.header("📦 Model kaynağı")
-    source = st.radio("Seçiniz", ["Hugging Face (sabit)", "Yerel (GitHub/models)"] , index=0)
+    st.header("📦 Model seçimi")
 
     if not TF_AVAILABLE:
         st.error(
-            """TensorFlow yüklü değil veya bu Python sürümüyle uyumlu değil.\n\n
-requirements.txt örneği:\n
+            """TensorFlow yüklü değil veya bu Python sürümüyle uyumlu değil.
+
+
+requirements.txt örneği:
+
 ```
 streamlit==1.49.1
 pillow
@@ -164,37 +166,57 @@ requests
         )
         st.stop()
 
+    # 1) Yerel modelleri tara
+    local_files = [p.name for p in MODELS_DIR.glob("*.h5")] + [p.name for p in MODELS_DIR.glob("*.keras")]
+
+    # 2) HF repo dosyalarını al (tam pathlerle)
+    try:
+        hf_paths = list_hf_files(HF_REPO)  # örn: ["weights/model.h5", "model.keras", ...]
+    except Exception as e:
+        hf_paths = []
+        st.warning(f"HF listelenemedi: {e}")
+
+    # 3) Tek bir dropdown için görünür isimleri oluştur
+    #    Çakışmaları çözmek için aynı isim iki kaynaktan geliyorsa sonuna kaynak etiketi ekle
+    from collections import Counter
+    local_basenames = local_files
+    hf_basenames = [os.path.basename(p) for p in hf_paths]
+    counts = Counter(local_basenames + hf_basenames)
+
+    options = []  # (display, source, identifier)
+    for name in sorted(local_basenames):
+        display = name if counts[name] == 1 else f"{name} (local)"
+        options.append((display, "local", name))
+    for full in sorted(hf_paths):
+        base = os.path.basename(full)
+        display = base if counts[base] == 1 else f"{base} (hf:{full})"
+        options.append((display, "hf", full))
+
+    if not options:
+        st.info("Henüz model yok. HF repodan indirilecek dosyalar otomatik menüye eklenecek.")
+        st.stop()
+
+    display_labels = [d for (d, _, _) in options]
+    choice = st.selectbox("Model dosyası", display_labels)
+    chosen = next((tpl for tpl in options if tpl[0] == choice), None)
+
+    # Seçime göre yol belirle: yerelde varsa direkt kullan; HF ise yoksa indir, varsa cache'ten kullan
     selected_model_path = ""
-
-    if source == "Hugging Face (sabit)":
-        st.caption(f"Repo: **{HF_REPO}**")
-        try:
-            hf_files = list_hf_files(HF_REPO)
-        except Exception as e:
-            st.error(f"Repo dosyaları listelenemedi: {e}")
-            st.stop()
-        if not hf_files:
-            st.warning("Bu repoda .h5/.keras dosyası bulunamadı.")
-            st.stop()
-        chosen_file = st.selectbox("HF model dosyası", hf_files)
-        rev = st.text_input("Revizyon/branch (opsiyonel)", value="")
-        auto_download = st.checkbox("Seçince indir ve kullan", value=True)
-        if auto_download:
-            try:
-                selected_model_path = hf_download(HF_REPO, chosen_file, rev or None)
-            except Exception as e:
-                st.error(f"Model indirilemedi: {e}")
-                st.stop()
+    if chosen is not None:
+        _disp, src, ident = chosen
+        if src == "local":
+            selected_model_path = str(MODELS_DIR / ident)
         else:
-            selected_model_path = str(MODELS_DIR / pathlib.Path(chosen_file).name)
-
-    elif source == "Yerel (GitHub/models)":
-        local_files = sorted([p.name for p in MODELS_DIR.glob("*.h5")] + [p.name for p in MODELS_DIR.glob("*.keras")])
-        if not local_files:
-            st.info("Repo içinde `models/` klasörüne .h5/.keras ekleyin veya HF sekmesinden indirip buraya kaydedin.")
-            st.stop()
-        chosen_local = st.selectbox("Yerel model dosyası", local_files)
-        selected_model_path = str(MODELS_DIR / chosen_local)
+            # ident: HF içindeki repo-relatif yol
+            local_target = MODELS_DIR / os.path.basename(ident)
+            if local_target.exists():
+                selected_model_path = str(local_target)
+            else:
+                try:
+                    selected_model_path = hf_download(HF_REPO, ident, None)
+                except Exception as e:
+                    st.error(f"Model indirilemedi: {e}")
+                    st.stop()
 
     # Ortak ayarlar
     topk = st.number_input("Top-K", min_value=1, max_value=10, value=5, step=1)
