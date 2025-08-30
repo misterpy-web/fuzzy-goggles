@@ -55,20 +55,31 @@ def list_hf_files() -> List[str]:
     except Exception as e:
         st.warning(f"HF listelenemedi: {e}")
         return []
-
 @st.cache_resource(show_spinner=False)
 def download_hf_model(filename: str) -> str:
     """HF'den dosyayı models/ altına indir ve yerel yolu döndür (private/public)."""
     from huggingface_hub import hf_hub_download
     token = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
-    path = hf_hub_download(repo_id=HF_REPO, filename=filename, local_dir=MODELS_DIR, token=token)
+    path = hf_hub_download(repo_id=HF_REPO, filename=filename,
+                           local_dir=MODELS_DIR, token=token)
+    # 👉 HF kaynak işareti (marker)
+    try:
+        with open(path + ".hfsource", "w", encoding="utf-8") as f:
+            f.write(json.dumps({"repo": HF_REPO, "filename": filename}))
+    except Exception:
+        pass
     return path
 
 def available_models() -> List[str]:
-    local_files = sorted(glob.glob(os.path.join(MODELS_DIR, "*.h5")) +
-                         glob.glob(os.path.join(MODELS_DIR, "*.keras")))
+    local_files = sorted(
+        glob.glob(os.path.join(MODELS_DIR, "*.h5")) +
+        glob.glob(os.path.join(MODELS_DIR, "*.keras"))
+    )
     local_names = {os.path.basename(f): f for f in local_files}
-    hf_files = list_hf_files()
+
+    hf_files = list_hf_files()  # repo içindeki güncel isimler
+
+    # 1) HF'te olanları indir (yoksa)
     for f in hf_files:
         if f not in local_names:
             try:
@@ -76,7 +87,36 @@ def available_models() -> List[str]:
                 local_names[f] = local_path
             except Exception as e:
                 st.error(f"{f} indirilemedi: {e}")
-    return sorted(local_names.values())
+
+    # 2) HF'ten gelmiş ama HF listesinde artık olmayan "yetim" cache'leri menüden çıkar
+    show_orphans = os.getenv("SHOW_HF_ORPHANS", "0") == "1"
+    prune_orphans = os.getenv("PRUNE_HF_ORPHANS", "0") == "1"  # varsayılan: silme
+
+    result = {}
+    for name, fullpath in local_names.items():
+        marker = fullpath + ".hfsource"
+        if os.path.exists(marker):
+            # Bu dosya HF'ten indirilmiş. HF'te hala var mı?
+            if name not in hf_files:
+                if prune_orphans:
+                    # İsteyenler için otomatik temizleme (opsiyonel)
+                    try:
+                        os.remove(fullpath)
+                    except Exception:
+                        pass
+                    try:
+                        os.remove(marker)
+                    except Exception:
+                        pass
+                    continue  # tamamen kaldırıldı
+                if not show_orphans:
+                    # Menüden gizle ama dosyayı bırak (default davranış)
+                    continue
+        # Buraya düşenler menüde görünsün
+        result[name] = fullpath
+
+    return sorted(result.values())
+
 
 with st.sidebar:
     st.header("📦 Model seçimi")
@@ -202,5 +242,6 @@ for r, (i, p) in enumerate(zip(idxs, vals), start=1):
 
 st.success("Tamamlandı ✅")
 #st.markdown("---")
+
 
 
