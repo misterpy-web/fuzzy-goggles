@@ -1,0 +1,5 @@
+streamlit==1.49.1
+pillow
+tensorflow==2.20.0
+huggingface_hub
+requests
