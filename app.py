@@ -17,6 +17,28 @@ except Exception as _e:
     TF_AVAILABLE = False
     TF_IMPORT_ERR = str(_e)
 
+# YOLO import (yeni)
+try:
+    from ultralytics import YOLO
+    YOLO_AVAILABLE = True
+except Exception as _e:
+    YOLO_AVAILABLE = False
+    st.warning(f"YOLO kullanılamıyor: {_e}")
+def run_detection(pil_img: Image.Image) -> Optional[Image.Image]:
+    """YOLO ile nesne tespiti yap ve kutulu görsel döndür."""
+    if not YOLO_AVAILABLE:
+        return None
+    try:
+        model_yolo = YOLO("yolov8n.pt")  # küçük pre-trained model
+        results = model_yolo.predict(pil_img, verbose=False)
+        # YOLO sonucu kutularla birlikte görsel olarak al
+        annotated = results[0].plot()  # numpy array
+        return Image.fromarray(annotated)
+    except Exception as e:
+        st.error(f"YOLO detection hatası: {e}")
+        return None
+
+
 st.set_page_config(page_title="CIFAR-100 Keras (H5) Demo", page_icon="🧪", layout="centered")
 st.title("🧪 CIFAR-100 – Keras .h5 Model Canlı Demo")
 
@@ -188,6 +210,12 @@ if uploaded is None:
 img = Image.open(io.BytesIO(uploaded.read()))
 st.image(img, caption="Yüklenen Görsel", use_container_width=True)
 
+# Nesne tespiti ve kutu çizme
+detected_img = run_detection(img)
+if detected_img:
+    st.image(detected_img, caption="Nesne Tespiti (YOLOv8)", use_container_width=True)
+
+
 x = preprocess(img, INPUT_SIZE)
 with st.spinner("Tahmin ediliyor..."):
     preds = model.predict(x, verbose=0)
@@ -211,3 +239,4 @@ st.markdown(
 3. Uygulama giriş boyutunu **otomatik** algılar.
     """
 )
+
