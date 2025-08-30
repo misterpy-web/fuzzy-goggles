@@ -188,7 +188,7 @@ FOUND_LOCAL = sorted([p.name for p in MODELS_DIR.glob("*.h5")] + [p.name for p i
 
 with st.sidebar:
     st.header("📦 Model Kaynağı")
-    source = st.radio("Model kaynağı", ["Local (.h5)", "Hugging Face Hub", "Direct URL", "HF Linkleri (çoklu)"], index=0)
+    source = st.radio("Model kaynağı", ["Local (.h5)", "Hugging Face Hub", "Direct URL", "HF Linkleri (çoklu)", "HF Repo Tara"], index=0)
 
     selected_model_path = ""
 
@@ -228,7 +228,7 @@ with st.sidebar:
     elif source == "HF Linkleri (çoklu)":
         st.caption("Her satıra bir HF dosya linki yapıştırın (resolve/blob). Örn: https://huggingface.co/user/repo/resolve/main/model.h5")
         links_text = st.text_area("HF linkleri", height=140, placeholder=(
-            "https://huggingface.co/username/repo/resolve/main/model.h5
+            "https://huggingface.co/misterpy-web/erty2323/resolve/main/model.h5
 "
             "https://huggingface.co/username/another-repo/blob/main/weights/model.keras"
         ))
@@ -247,7 +247,32 @@ with st.sidebar:
 " + "
 ".join(f"- {u} → {err}" for u, err in failed))
 
-    # Ortak ayarlar
+    elif source == "HF Repo Tara":
+        st.caption("Bir Hugging Face deposundaki .h5/.keras dosyalarını listeleyip indirir.")
+        default_repo = "misterpy-web/erty2323"
+        hf_repo_list = st.text_input("HF repo id", value=default_repo)
+        refresh = st.button("📄 Dosyaları Listele")
+        files_list = []
+        if refresh and hf_repo_list:
+            try:
+                from huggingface_hub import HfApi
+                api = HfApi()
+                files_list = api.list_repo_files(repo_id=hf_repo_list)
+                h5_files = [f for f in files_list if f.lower().endswith((".h5", ".keras"))]
+                if not h5_files:
+                    st.warning("Bu repoda .h5/.keras dosyası bulunamadı.")
+                else:
+                    choice = st.selectbox("İndirilecek dosya", h5_files)
+                    if st.button("📥 Seçili dosyayı indir"):
+                        try:
+                            path = hf_download(hf_repo_list, choice, None)
+                            st.success(f"İndirildi: {path}")
+                            selected_model_path = path
+                        except Exception as e:
+                            st.error(f"İndirme hatası: {e}")
+            except Exception as e:
+                st.error(f"Listeleme hatası: {e}")
+
     topk = st.number_input("Top-K", min_value=1, max_value=10, value=5, step=1)
     with st.expander("Gelişmiş (opsiyonel)"):
         manual_size = st.number_input("Zorla giriş boyutu (0 = otomatik)", min_value=0, max_value=1024, value=0, step=8)
