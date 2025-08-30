@@ -9,9 +9,9 @@ import numpy as np
 import streamlit as st
 from PIL import Image
 
-# -------------------------------------------------------------
-# TensorFlow / Keras (korumalı import)
-# -------------------------------------------------------------
+# ============================
+# Runtime / Env
+# ============================
 try:
     import tensorflow as tf
     TF_AVAILABLE = True
@@ -19,12 +19,15 @@ except Exception as _e:
     TF_AVAILABLE = False
     TF_IMPORT_ERR = str(_e)
 
-st.set_page_config(page_title="CIFAR-100 Keras (H5) Demo", page_icon="🧪", layout="centered")
+st.set_page_config(page_title="CIFAR-100 – Keras Model Canlı Demo", page_icon="🧪", layout="centered")
 st.title("🧪 CIFAR-100 – Keras Model Canlı Demo")
 
-# -------------------------------------------------------------
-# CIFAR-100 fine label names (yedek)
-# -------------------------------------------------------------
+# ============================
+# Constants
+# ============================
+HF_REPO = "misterpy-web/erty2323"   # sabit HF repo
+MODELS_DIR = pathlib.Path("models"); MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
 CIFAR100_FINE = [
     "apple","aquarium_fish","baby","bear","beaver","bed","bee","beetle","bicycle","bottle",
     "bowl","boy","bridge","bus","butterfly","camel","can","castle","caterpillar","cattle","chair","chimpanzee","clock","cloud","cockroach","couch","crab","crocodile","cup","dinosaur",
@@ -34,31 +37,36 @@ CIFAR100_FINE = [
     "trout","tulip","turtle","wardrobe","whale","willow","wolf","woman","worm"
 ]
 
-# -------------------------------------------------------------
-# Ayarlar: SADECE BU HUGGING FACE REPO İÇİN ÇEK (sabitle)
-# -------------------------------------------------------------
-HF_REPO = "misterpy-web/erty2323"  # 🔒 sadece bu repo
-MODELS_DIR = pathlib.Path("models")
-MODELS_DIR.mkdir(parents=True, exist_ok=True)
-
-# -------------------------------------------------------------
-# Yardımcılar
-# -------------------------------------------------------------
+# ============================
+# HF helpers
+# ============================
 @st.cache_resource(show_spinner=False)
 def list_hf_files(repo_id: str) -> List[str]:
-    from huggingface_hub import HfApi
+    """List .h5/.keras files in HF repo (relative paths)."""
+    try:
+        from huggingface_hub import HfApi
+    except Exception as e:
+        st.error("`huggingface_hub` eksik. requirements.txt içine ekleyin.")
+        raise
     api = HfApi()
     files = api.list_repo_files(repo_id=repo_id)
     return [f for f in files if f.lower().endswith((".h5", ".keras"))]
 
-
 @st.cache_resource(show_spinner=False)
 def hf_download(repo_id: str, filename: str, revision: Optional[str] = None) -> str:
+    """Download a file from HF into models/ and return local path."""
     from huggingface_hub import hf_hub_download
     path = hf_hub_download(repo_id=repo_id, filename=filename, revision=revision, local_dir=str(MODELS_DIR))
     return path
 
+# alias to match older references
+def auto_download(filename: str, revision: Optional[str] = None) -> str:
+    """Backwards-compatible helper used elsewhere in the app."""
+    return hf_download(HF_REPO, filename, revision)
 
+# ============================
+# Model + image helpers
+# ============================
 @st.cache_resource(show_spinner=False)
 def load_keras_model(path: str):
     model = tf.keras.models.load_model(path, compile=False)
@@ -142,9 +150,9 @@ def topk_from_probs(probs: np.ndarray, k: int) -> Tuple[List[int], List[float]]:
     vals = probs[0, idxs].astype(float).tolist()
     return idxs, vals
 
-# -------------------------------------------------------------
-# Sidebar – Tek menü: HF (sabit repo) + Yerel (GitHub/models) birleştirilmiş
-# -------------------------------------------------------------
+# ============================
+# SIDEBAR – Tek menü (HF + Yerel bir arada)
+# ============================
 with st.sidebar:
     st.header("📦 Model seçimi")
 
@@ -166,24 +174,23 @@ requests
         )
         st.stop()
 
-    # 1) Yerel modelleri tara
+    # Local list
     local_files = [p.name for p in MODELS_DIR.glob("*.h5")] + [p.name for p in MODELS_DIR.glob("*.keras")]
 
-    # 2) HF repo dosyalarını al (tam pathlerle)
+    # HF list
     try:
-        hf_paths = list_hf_files(HF_REPO)  # örn: ["weights/model.h5", "model.keras", ...]
+        hf_paths = list_hf_files(HF_REPO)  # repo-relative paths
     except Exception as e:
         hf_paths = []
         st.warning(f"HF listelenemedi: {e}")
 
-    # 3) Tek bir dropdown için görünür isimleri oluştur
-    #    Çakışmaları çözmek için aynı isim iki kaynaktan geliyorsa sonuna kaynak etiketi ekle
+    # Build single dropdown options
     from collections import Counter
     local_basenames = local_files
     hf_basenames = [os.path.basename(p) for p in hf_paths]
     counts = Counter(local_basenames + hf_basenames)
 
-    options = []  # (display, source, identifier)
+    options = []  # (display, source, ident)
     for name in sorted(local_basenames):
         display = name if counts[name] == 1 else f"{name} (local)"
         options.append((display, "local", name))
@@ -193,49 +200,40 @@ requests
         options.append((display, "hf", full))
 
     if not options:
-        st.info("Henüz model yok. HF repodan indirilecek dosyalar otomatik menüye eklenecek.")
+        st.info("Henüz model yok. HF repodan indirebilir veya repo/models içine ekleyebilirsiniz.")
         st.stop()
 
-    display_labels = [d for (d, _, _) in options]
-    choice = st.selectbox("Model dosyası", display_labels)
-    chosen = next((tpl for tpl in options if tpl[0] == choice), None)
-
-    # Seçime göre yol belirle: yerelde varsa direkt kullan; HF ise yoksa indir, varsa cache'ten kullan
+    choice = st.selectbox("Model dosyası", [d for (d,_,_) in options])
     selected_model_path = ""
-    if chosen is not None:
-        _disp, src, ident = chosen
+    if choice:
+        _disp, src, ident = next(t for t in options if t[0] == choice)
         if src == "local":
             selected_model_path = str(MODELS_DIR / ident)
         else:
-            # ident: HF içindeki repo-relatif yol
             local_target = MODELS_DIR / os.path.basename(ident)
             if local_target.exists():
                 selected_model_path = str(local_target)
             else:
                 try:
-                    selected_model_path = hf_download(HF_REPO, ident, None)
+                    selected_model_path = auto_download(ident)
                 except Exception as e:
                     st.error(f"Model indirilemedi: {e}")
                     st.stop()
 
-    # Ortak ayarlar
+    # Common settings
     topk = st.number_input("Top-K", min_value=1, max_value=10, value=5, step=1)
     with st.expander("Gelişmiş (opsiyonel)"):
         manual_size = st.number_input("Zorla giriş boyutu (0 = otomatik)", min_value=0, max_value=1024, value=0, step=8)
         force_softmax = st.checkbox("Çıkışa softmax uygula (zorla)", value=False)
         keep_aspect = st.checkbox("En-boy oranını koru (pad)", value=False)
 
-# -------------------------------------------------------------
-# Ana akış
-# -------------------------------------------------------------
-# Modeli indir
-try:
-    selected_model_path = hf_download(HF_REPO, chosen_file, rev or None) if auto_download else str(MODELS_DIR / pathlib.Path(chosen_file).name)
-except Exception as e:
-    st.error(f"Model indirilemedi: {e}")
+# ============================
+# MAIN
+# ============================
+if not selected_model_path:
+    st.warning("Lütfen bir model seçin.")
     st.stop()
 
-# Yükle
 try:
     model = load_keras_model(selected_model_path)
 except Exception as e:
@@ -247,7 +245,6 @@ INPUT_SIZE = manual_size if manual_size > 0 else infer_input_size(model)
 st.caption(f"Giriş boyutu: {INPUT_SIZE}px")
 
 uploaded = st.file_uploader("Bir görüntü yükleyin", type=["png","jpg","jpeg","bmp","webp"])
-
 if uploaded is None:
     st.info("👆 Bir görsel yükleyin.")
     st.stop()
