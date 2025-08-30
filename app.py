@@ -224,13 +224,24 @@ if uploaded is None:
     st.stop()
 
 img = Image.open(io.BytesIO(uploaded.read()))
+
+# Nesne tespiti uygula (annotated resim döner)
+detected_img = run_detection(img)  
+
+if detected_img:
+    st.image(detected_img, caption="Yüklenen Görsel + Nesne Tespiti", use_container_width=True)
+else:
+    st.image(img, caption="Yüklenen Görsel", use_container_width=True)
+"""
+
+img = Image.open(io.BytesIO(uploaded.read()))
 st.image(img, caption="Yüklenen Görsel", use_container_width=True)
 
 detected_img = run_detection(img)
 if detected_img:
     st.image(detected_img, caption="Nesne Tespiti (Faster R-CNN)", use_container_width=True)
 
-
+"""
 
 x = preprocess(img, INPUT_SIZE)
 with st.spinner("Tahmin ediliyor..."):
@@ -255,6 +266,7 @@ st.markdown(
 3. Uygulama giriş boyutunu **otomatik** algılar.
     """
 )
+
 
 
 
