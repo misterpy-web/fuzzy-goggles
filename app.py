@@ -47,27 +47,29 @@ HF_RAW = f"https://huggingface.co/{HF_REPO}/resolve/main"
 MODELS_DIR = "models"
 os.makedirs(MODELS_DIR, exist_ok=True)
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=60)
 def list_hf_files() -> List[str]:
+    """Hugging Face repo içindeki .h5/.keras dosyalarını listeler (private/public).
+    TTL=60s: 1 dk içinde otomatik tazelenir. "Yenile" butonu cache'i anında temizler.
+    """
     try:
-        r = requests.get(HF_API, timeout=10)
-        r.raise_for_status()
-        data = r.json()
-        return [f["rfilename"] for f in data.get("siblings", []) if f["rfilename"].endswith((".h5",".keras"))]
-    except Exception:
+        from huggingface_hub import HfApi
+        token = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
+        api = HfApi(token=token)
+        files = api.list_repo_files(repo_id=HF_REPO)
+        return [f for f in files if f.lower().endswith((".h5", ".keras"))]
+    except Exception as e:
+        st.warning(f"HF listelenemedi: {e}")
         return []
 
 @st.cache_resource(show_spinner=False)
 def download_hf_model(filename: str) -> str:
-    url = f"{HF_RAW}/{filename}"
-    local_path = os.path.join(MODELS_DIR, os.path.basename(filename))
-    if not os.path.exists(local_path):
-        r = requests.get(url, stream=True, timeout=30)
-        r.raise_for_status()
-        with open(local_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                f.write(chunk)
-    return local_path
+    """HF'den dosyayı models/ altına indir ve yerel yolu döndür (private/public)."""
+    from huggingface_hub import hf_hub_download
+    token = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
+    path = hf_hub_download(repo_id=HF_REPO, filename=filename, local_dir=MODELS_DIR, token=token)
+    # hf_hub_download geri dönüşü zaten yerel tam yoldur
+    return path
 
 # -------------------------------------------------------------
 # Model listesi (yerel + HF birleşik)
@@ -78,6 +80,9 @@ all_models = sorted(set(local_models) | set(hf_models))
 
 with st.sidebar:
     st.header("📦 Model seçimi")
+    if st.button("🔄 Listeyi yenile"):
+        list_hf_files.clear()  # cache temizle
+        st.rerun()
     if not all_models:
         st.info("models/ klasörüne veya HuggingFace repoya .h5/.keras dosyaları koyun.")
         selected_model_name = ""
